@@ -53,6 +53,8 @@
     touch-action: manipulation;
     transition: transform .08s ease-out, box-shadow .08s ease-out;
   }
+  #btn.paused { filter: saturate(.55) brightness(.9); }
+  #btn.paused #timer { opacity: .7; }
   #btn.pressed { transform: scale(.95); box-shadow: 0 8px 30px -10px rgba(255, 111, 181, .6), inset 0 -6px 20px rgba(140, 0, 70, .25), inset 0 8px 24px rgba(255, 255, 255, .25); }
   /* Shimmer: a soft highlight sweeping across every few seconds. */
   #btn::after {
@@ -101,11 +103,6 @@
     visibility: hidden; opacity: 0; transition: opacity .2s;
   }
   #undo.show { visibility: visible; opacity: 1; }
-  #end {
-    margin-top: 6px; height: 36px; padding: 0 18px; border: 0; background: none;
-    color: var(--muted); font: inherit; font-size: 15px; visibility: hidden;
-  }
-  #end.show { visibility: visible; }
 
   /* ---------- Lists ---------- */
   h1 { font-size: 28px; margin: 20px 0 12px; letter-spacing: -.01em; }
@@ -216,13 +213,12 @@
 <body>
 
 <section id="tap" class="screen active">
-  <button id="btn" aria-label="Add ticket">
+  <button id="btn" aria-label="Start ticket">
     <span id="count">0</span>
     <span id="timer">0:00</span>
   </button>
   <div id="label">tickets today</div>
   <button id="undo">Undo last tap</button>
-  <button id="end">End day</button>
 </section>
 
 <section id="tickets" class="screen">
@@ -272,8 +268,8 @@
   const UNDO_MS = 5000;
 
   // ---------- Storage ----------
-  // Data is two sorted arrays of timestamps (ms): taps start tickets, ends stop the
-  // day's running ticket. Plus a map of tap timestamp -> category name. Everything else is derived.
+  // Data is two sorted arrays of timestamps (ms): taps start tickets, ends pause (stop)
+  // the running ticket. Plus a map of tap timestamp -> category name. Everything else is derived.
   function load(key = KEY) {
     let raw;
     try { raw = localStorage.getItem(key); } catch { return []; }
@@ -443,8 +439,8 @@
     }, syncError);
   }
 
-  // A ticket lasts from its tap until the next tap or the day being ended, whichever comes
-  // first (same day only). Returns Infinity when nothing has stopped it yet.
+  // A ticket lasts from its tap until it's paused (or the next tap, in data from before
+  // pausing existed), same day only. Returns Infinity when nothing has stopped it yet.
   function stopOf(start, nextTap = Infinity) {
     const end = ends.find(e => e > start && dayKey(e) === dayKey(start));
     return Math.min(nextTap, end ?? Infinity);
@@ -477,7 +473,7 @@
 
   // ---------- Tap screen ----------
   const $ = id => document.getElementById(id);
-  const btn = $('btn'), countEl = $('count'), timerEl = $('timer'), labelEl = $('label'), undoBtn = $('undo'), endBtn = $('end');
+  const btn = $('btn'), countEl = $('count'), timerEl = $('timer'), labelEl = $('label'), undoBtn = $('undo');
   let undoTimeout, undoKind, undoTarget;
 
   function renderTap() {
@@ -487,15 +483,17 @@
     countEl.textContent = n;
     const last = taps[taps.length - 1];
     const live = running();
-    timerEl.textContent = live ? timerText(Date.now() - last) : n ? 'done' : '0:00';
-    labelEl.textContent = n && !live ? `tickets today · ended ${clock(stopOf(last))}` : 'tickets today';
-    endBtn.classList.toggle('show', live);
+    // While paused the timer holds the last ticket's time until the next tap starts a new one.
+    timerEl.textContent = live ? timerText(Date.now() - last) : n ? timerText(stopOf(last) - last) : '0:00';
+    labelEl.textContent = n && !live ? `paused ${clock(stopOf(last))} · tap for next` : 'tickets today';
+    btn.classList.toggle('paused', n > 0 && !live);
+    btn.setAttribute('aria-label', live ? 'Pause ticket' : 'Start ticket');
   }
 
   function offerUndo(kind) {
     const list = kind === 'end' ? ends : taps;
     undoKind = kind; undoTarget = list[list.length - 1];
-    undoBtn.textContent = kind === 'end' ? 'Undo end day' : 'Undo last tap';
+    undoBtn.textContent = kind === 'end' ? 'Undo pause' : 'Undo new ticket';
     undoBtn.classList.add('show');
     clearTimeout(undoTimeout);
     undoTimeout = setTimeout(() => undoBtn.classList.remove('show'), UNDO_MS);
@@ -527,15 +525,26 @@
     }
   }
 
+  // Play/pause: a tap starts the next ticket, the following tap pauses it. Time spent
+  // paused doesn't count toward any ticket.
   btn.addEventListener('pointerdown', e => {
     e.preventDefault();
+    btn.classList.add('pressed');
+    keepAwake();
+    if (running()) {
+      ends.push(Date.now());
+      clearTimeout(pickerTimeout);
+      save();
+      renderTap();
+      offerUndo('end');
+      if (navigator.vibrate) navigator.vibrate(20);
+      return;
+    }
     taps.push(Date.now());
     save();
     renderTap();
     burst(e.clientX, e.clientY);
-    btn.classList.add('pressed');
     offerUndo('tap');
-    keepAwake();
     // Let the pop play before the picker slides up.
     const ts = taps[taps.length - 1], n = countEl.textContent;
     clearTimeout(pickerTimeout);
@@ -555,15 +564,6 @@
       renderTap();
     }
     undoBtn.classList.remove('show');
-  });
-
-  // Stops today's running ticket. Tapping again later just starts a new ticket.
-  endBtn.addEventListener('click', () => {
-    if (!running()) return;
-    ends.push(Date.now());
-    save();
-    renderTap();
-    offerUndo('end');
   });
 
   // ---------- Category picker ----------
