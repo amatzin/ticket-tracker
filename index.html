@@ -20,7 +20,10 @@
     --muted: #b48fa6;
     --accent: #ff6fb5;
     --accent-2: #e8459a;
+    --ok: #ffd95a;
+    --on-ok: #3d2600;
     --tab-h: 64px;
+    color-scheme: dark;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
@@ -138,6 +141,62 @@
     display: block; width: 100%; height: 44px; margin: 0 0 28px; border-radius: 12px;
     border: 1px solid var(--line); background: none; color: var(--accent); font: inherit; font-size: 15px;
   }
+  #reset.armed { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+  .cat {
+    display: inline-block; margin-left: 8px; padding: 2px 9px; border-radius: 10px; vertical-align: 1px;
+    background: rgba(255, 111, 181, .15); color: var(--accent); font-size: 12px;
+  }
+  .row[data-ts] { cursor: pointer; }
+
+  /* ---------- Category sheet ---------- */
+  #sheet {
+    position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, .35);
+    opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s;
+  }
+  #sheet.open { opacity: 1; visibility: visible; }
+  .sheet-card {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 18px 16px calc(20px + env(safe-area-inset-bottom));
+    background: var(--surface); border-radius: 22px 22px 0 0; border-top: 1px solid var(--line);
+    transform: translateY(100%); transition: transform .25s cubic-bezier(.2, .8, .3, 1);
+  }
+  #sheet.open .sheet-card { transform: none; }
+  .sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  #sheet-title { font-size: 17px; font-weight: 600; }
+  #skip { background: none; border: 0; color: var(--muted); font: inherit; font-size: 16px; padding: 8px 0 8px 16px; }
+  #chips { display: flex; flex-wrap: wrap; gap: 10px; max-height: 40vh; overflow-y: auto; }
+  .chip {
+    height: 46px; padding: 0 18px; border-radius: 23px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit; font-size: 16px;
+  }
+  .chip.selected { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; animation: pick .25s ease-out; }
+  .chip.selected::before { content: '✓\00a0'; }
+  @keyframes pick { 50% { transform: scale(1.08); } }
+  .chip.add { border: 1px dashed var(--accent); background: none; color: var(--accent); }
+  #new-cat { display: flex; gap: 10px; margin-top: 12px; }
+  #new-cat[hidden] { display: none; }
+  #new-name {
+    flex: 1; min-width: 0; height: 46px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit; font-size: 16px; -webkit-user-select: text; user-select: text;
+  }
+  #new-name:focus { outline: none; border-color: var(--accent); }
+  #save {
+    display: block; width: 100%; height: 54px; margin-top: 18px; border: 0; border-radius: 14px;
+    background: var(--accent); color: #fff; font: inherit; font-size: 17px; font-weight: 600;
+    transition: background .2s;
+  }
+  #save:disabled { background: var(--line); color: var(--muted); }
+  #save.done { background: var(--ok); color: var(--on-ok); }
+  #toast {
+    position: fixed; left: 50%; z-index: 30; bottom: calc(var(--tab-h) + env(safe-area-inset-bottom) + 16px);
+    max-width: calc(100vw - 32px); padding: 12px 20px; border-radius: 24px;
+    background: var(--ok); color: var(--on-ok); font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    box-shadow: 0 10px 30px -8px rgba(0, 0, 0, .5); pointer-events: none;
+    opacity: 0; transform: translate(-50%, 16px); transition: opacity .2s, transform .25s cubic-bezier(.2, .8, .3, 1);
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #new-cat button { height: 46px; padding: 0 20px; border-radius: 12px; border: 0; background: var(--accent); color: #fff; font: inherit; font-size: 16px; font-weight: 600; }
 
   /* ---------- Tab bar ---------- */
   nav {
@@ -178,6 +237,20 @@
 
 <div id="fx"></div>
 
+<div id="sheet">
+  <div class="sheet-card" role="dialog" aria-labelledby="sheet-title">
+    <div class="sheet-head"><span id="sheet-title">Category</span><button id="skip">Skip</button></div>
+    <div id="chips"></div>
+    <form id="new-cat" hidden>
+      <input id="new-name" placeholder="New category" maxlength="30" autocomplete="off" autocapitalize="sentences" enterkeyhint="done">
+      <button>Add</button>
+    </form>
+    <button id="save" disabled>Pick a category</button>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
 <nav>
   <button data-tab="tap" class="active">
     <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="9"/></svg>Tap
@@ -194,13 +267,16 @@
 (() => {
   const KEY = 'ticket-tracker.taps.v1';
   const ENDS_KEY = 'ticket-tracker.ends.v1';
+  const CATS_KEY = 'ticket-tracker.cats.v1';
+  const PICKER_DELAY_MS = 350;
   const UNDO_MS = 5000;
 
   // ---------- Storage ----------
   // Data is two sorted arrays of timestamps (ms): taps start tickets, ends stop the
-  // day's running ticket. Everything else is derived.
+  // day's running ticket. Plus a map of tap timestamp -> category name. Everything else is derived.
   function load(key = KEY) {
-    const raw = localStorage.getItem(key);
+    let raw;
+    try { raw = localStorage.getItem(key); } catch { return []; }
     if (!raw) return [];
     try {
       const arr = JSON.parse(raw);
@@ -208,31 +284,50 @@
       return arr.filter(Number.isFinite).sort((a, b) => a - b);
     } catch {
       // Never silently overwrite data we couldn't read: stash it first.
-      localStorage.setItem(key + '.corrupt.' + Date.now(), raw);
+      try { localStorage.setItem(key + '.corrupt.' + Date.now(), raw); } catch {}
       return [];
     }
   }
+  function loadCats() {
+    let raw;
+    try { raw = localStorage.getItem(CATS_KEY); } catch { return {}; }
+    if (!raw) return {};
+    try {
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('bad shape');
+      return obj;
+    } catch {
+      try { localStorage.setItem(CATS_KEY + '.corrupt.' + Date.now(), raw); } catch {}
+      return {};
+    }
+  }
   function save() {
+    saveLocal();
+    push();
+  }
+  function saveLocal() {
     try {
       localStorage.setItem(KEY, JSON.stringify(taps));
       localStorage.setItem(ENDS_KEY, JSON.stringify(ends));
+      localStorage.setItem(CATS_KEY, JSON.stringify(cats));
     } catch {
-      alert('Could not save — storage is full or blocked. Export a backup from the Days tab.');
+      if (!cloud) toast('Couldn’t save on this device. Export a backup from the Days tab.');
     }
   }
-  let taps = load(), ends = load(ENDS_KEY);
-  const reload = () => { taps = load(); ends = load(ENDS_KEY); };
+  let taps = load(), ends = load(ENDS_KEY), cats = loadCats();
+  const reload = () => { taps = load(); ends = load(ENDS_KEY); cats = loadCats(); };
 
   // Ask the browser not to evict our storage (no-op where unsupported).
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
   // Keep in sync if the app is open in two places on the same device.
-  addEventListener('storage', e => { if (e.key === KEY || e.key === ENDS_KEY) { reload(); render(); } });
+  addEventListener('storage', e => { if ([KEY, ENDS_KEY, CATS_KEY].includes(e.key)) { reload(); render(); } });
 
   // ---------- Helpers ----------
   const pad = n => String(n).padStart(2, '0');
   const dayKey = ms => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
   const todayKey = () => dayKey(Date.now());
+  const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
   const clock = ms => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
   function timerText(ms) {
@@ -252,6 +347,100 @@
     if (key === dayKey(y)) return 'Yesterday';
     const [Y, M, D] = key.split('-').map(Number);
     return new Date(Y, M - 1, D).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  // ---------- Cloud sync ----------
+  // Only when running as a claude.ai artifact: each month is one document in the viewer's
+  // private db space, so the data survives and follows them across devices. localStorage
+  // stays as the instant local copy.
+  const monthKey = ms => dayKey(ms).slice(0, 7);
+  const nums = a => (Array.isArray(a) ? a : []).filter(Number.isFinite).sort((x, y) => x - y);
+  const sortedCats = o => Object.fromEntries(Object.entries(o || {}).filter(([, c]) => typeof c === 'string').sort(([a], [b]) => a - b));
+  let cloud = null;                    // { col, ready } once the viewer's space is reachable
+  const synced = {}, busy = {};        // month -> JSON the cloud has; month -> write in flight
+  const dirty = new Set();             // months changed again while a write was in flight
+
+  function monthData(m) {
+    const inM = t => monthKey(t) === m;
+    const c = {};
+    for (const [ts, name] of Object.entries(cats)) if (inM(Number(ts))) c[ts] = name;
+    return { taps: taps.filter(inM), ends: ends.filter(inM), cats: sortedCats(c) };
+  }
+  function replaceMonth(m, d) {
+    const out = t => monthKey(t) !== m;
+    taps = taps.filter(out).concat(d.taps).sort((a, b) => a - b);
+    ends = ends.filter(out).concat(d.ends).sort((a, b) => a - b);
+    for (const ts of Object.keys(cats)) if (monthKey(Number(ts)) === m) delete cats[ts];
+    Object.assign(cats, d.cats);
+  }
+
+  function push() {
+    if (!cloud?.ready) return;
+    const months = new Set([...taps, ...ends].map(monthKey).concat(Object.keys(synced)));
+    for (const m of months) if (JSON.stringify(monthData(m)) !== synced[m]) write(m);
+  }
+  async function write(m) {
+    if (busy[m]) { dirty.add(m); return; }
+    busy[m] = true;
+    try {
+      do {
+        dirty.delete(m);
+        const data = monthData(m), json = JSON.stringify(data);
+        if (json === synced[m]) continue;
+        const ref = cloud.col.doc('m' + m);
+        if (data.taps.length || data.ends.length) await ref.set(data); else await ref.delete();
+        synced[m] = json;
+      } while (dirty.has(m));
+    } catch (e) {
+      syncError(e);
+    } finally {
+      busy[m] = false;
+    }
+  }
+
+  // The first answer is merged with what's on this device (nothing gets lost when a phone
+  // starts using the cloud); after that the cloud copy of each month wins, unless this
+  // device has a newer change to that month on its way up.
+  function applyRemote(snap) {
+    const first = !cloud.ready;
+    const remote = {};
+    for (const d of snap.docs) if (/^m\d{4}-\d{2}$/.test(d.id)) remote[d.id.slice(1)] = d.data();
+    let changed = false;
+    for (const m of new Set([...Object.keys(remote), ...Object.keys(synced)])) {
+      if (busy[m] || dirty.has(m)) continue;
+      const r = remote[m] || {};
+      const d = { taps: nums(r.taps), ends: nums(r.ends), cats: sortedCats(r.cats) };
+      synced[m] = JSON.stringify(d);
+      if (first) {
+        const mine = monthData(m);
+        d.taps = nums([...new Set([...d.taps, ...mine.taps])]);
+        d.ends = nums([...new Set([...d.ends, ...mine.ends])]);
+        d.cats = sortedCats({ ...d.cats, ...mine.cats });
+      }
+      if (JSON.stringify(d) === JSON.stringify(monthData(m))) continue;
+      replaceMonth(m, d);
+      changed = true;
+    }
+    if (changed) { saveLocal(); render(); }
+  }
+
+  function syncError(e) {
+    toast(e?.code === 'quota_exceeded'
+      ? 'Cloud storage is full. Taps are still saved on this device.'
+      : 'Couldn’t sync. Taps are still saved on this device.');
+  }
+
+  async function startSync() {
+    if (!window.claude?.use) return;
+    const [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
+    const uid = db && user ? await user.id() : null;
+    if (!uid) return;
+    cloud = { col: db.collection('data/users/' + uid), ready: false };
+    cloud.col.onSnapshot(snap => {
+      if (snap.metadata.fromCache) return;
+      applyRemote(snap);
+      if (!cloud.ready) { cloud.ready = true; push(); }
+    }, syncError);
   }
 
   // A ticket lasts from its tap until the next tap or the day being ended, whichever comes
@@ -289,7 +478,7 @@
   // ---------- Tap screen ----------
   const $ = id => document.getElementById(id);
   const btn = $('btn'), countEl = $('count'), timerEl = $('timer'), labelEl = $('label'), undoBtn = $('undo'), endBtn = $('end');
-  let undoTimeout, undoKind;
+  let undoTimeout, undoKind, undoTarget;
 
   function renderTap() {
     const t = todayKey();
@@ -304,7 +493,8 @@
   }
 
   function offerUndo(kind) {
-    undoKind = kind;
+    const list = kind === 'end' ? ends : taps;
+    undoKind = kind; undoTarget = list[list.length - 1];
     undoBtn.textContent = kind === 'end' ? 'Undo end day' : 'Undo last tap';
     undoBtn.classList.add('show');
     clearTimeout(undoTimeout);
@@ -346,6 +536,10 @@
     btn.classList.add('pressed');
     offerUndo('tap');
     keepAwake();
+    // Let the pop play before the picker slides up.
+    const ts = taps[taps.length - 1], n = countEl.textContent;
+    clearTimeout(pickerTimeout);
+    pickerTimeout = setTimeout(() => openSheet(ts, `Ticket #${n}`), PICKER_DELAY_MS);
   });
   const release = () => btn.classList.remove('pressed');
   btn.addEventListener('pointerup', release);
@@ -354,8 +548,9 @@
 
   undoBtn.addEventListener('click', () => {
     const list = undoKind === 'end' ? ends : taps;
-    if (list.length && Date.now() - list[list.length - 1] < UNDO_MS + 1000) {
+    if (list.length && list[list.length - 1] === undoTarget) {
       list.pop();
+      if (undoKind === 'tap') delete cats[undoTarget];
       save();
       renderTap();
     }
@@ -370,6 +565,90 @@
     renderTap();
     offerUndo('end');
   });
+
+  // ---------- Category picker ----------
+  // Tap a category to select it (or add one with "+ New"), then Save to confirm.
+  const sheet = $('sheet'), chipsEl = $('chips'), newForm = $('new-cat'), newName = $('new-name'), saveBtn = $('save');
+  const SAVED_MS = 600;
+  let sheetFor = null, sheetTitle = '', selected = null, added = [], pickerTimeout, toastTimeout;
+
+  // Most used first, so the usual picks stay put at the top.
+  function categories() {
+    const counts = {};
+    for (const c of Object.values(cats)) counts[c] = (counts[c] || 0) + 1;
+    return Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+  }
+
+  function renderChips() {
+    chipsEl.innerHTML = [...categories(), ...added].map(c =>
+      `<button class="chip${c === selected ? ' selected' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`
+    ).join('') + '<button class="chip add" id="add-cat">+ New</button>';
+    saveBtn.disabled = !selected;
+    saveBtn.textContent = selected ? `Save · ${selected}` : 'Pick a category';
+  }
+
+  function openSheet(ts, title) {
+    sheetFor = ts; sheetTitle = title;
+    selected = cats[ts] || null; added = [];
+    $('sheet-title').textContent = title;
+    newForm.hidden = true;
+    newName.value = '';
+    saveBtn.classList.remove('done');
+    renderChips();
+    sheet.classList.add('open');
+  }
+
+  function select(cat) {
+    selected = cat;
+    renderChips();
+  }
+
+  function toast(text) {
+    const el = $('toast');
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => el.classList.remove('show'), 2200);
+  }
+
+  saveBtn.addEventListener('click', () => {
+    if (!selected || sheetFor == null || saveBtn.classList.contains('done')) return;
+    if (taps.includes(sheetFor)) { cats[sheetFor] = selected; save(); render(); }
+    saveBtn.classList.add('done');
+    saveBtn.textContent = '✓ Saved';
+    if (navigator.vibrate) navigator.vibrate(30);
+    const msg = `✓ ${sheetTitle} saved as ${selected}`;
+    setTimeout(() => { closeSheet(); toast(msg); }, SAVED_MS);
+  });
+
+  function closeSheet() {
+    sheetFor = null;
+    newName.blur();
+    sheet.classList.remove('open');
+    // The undo window ran out behind the sheet; give it a fresh one.
+    if (undoKind === 'tap' && taps[taps.length - 1] === undoTarget && tab === 'tap') offerUndo('tap');
+  }
+
+  chipsEl.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.id === 'add-cat') { b.hidden = true; newForm.hidden = false; newName.focus(); }
+    else select(b.dataset.cat);
+  });
+  newForm.addEventListener('submit', e => {
+    e.preventDefault();
+    const name = newName.value.trim().replace(/\s+/g, ' ');
+    if (!name) return;
+    // Reuse an existing category that only differs by case.
+    const existing = [...categories(), ...added].find(c => c.toLowerCase() === name.toLowerCase());
+    if (!existing) added.push(name);
+    newName.value = '';
+    newName.blur();
+    newForm.hidden = true;
+    select(existing || name);
+  });
+  $('skip').addEventListener('click', () => closeSheet());
+  sheet.addEventListener('click', e => { if (e.target === sheet) closeSheet(); });
 
   // Keep the screen on while the app is visible (iOS 16.4+). Silently ignored elsewhere.
   let wakeLock = null;
@@ -395,7 +674,8 @@
         if (t.dur != null) dur = `<span class="dur">${durText(t.dur)}</span>`;
         else if (d.key === today) dur = `<span class="dur live" data-live="${t.start}">${durText(Date.now() - t.start)}</span>`;
         else dur = `<span class="dur none">—</span>`;
-        return `<div class="row"><span class="num">#${t.n}</span><span class="time">${clock(t.start)}</span>${dur}</div>`;
+        const cat = cats[t.start] ? `<span class="cat">${esc(cats[t.start])}</span>` : '';
+        return `<div class="row" data-ts="${t.start}" data-n="${t.n}"><span class="num">#${t.n}</span><span class="time">${clock(t.start)}${cat}</span>${dur}</div>`;
       }).join('');
       return `<div class="group">
         <div class="group-head"><span>${dayLabel(d.key)}</span><span>${d.tickets.length} · avg ${d.avg != null ? durText(d.avg) : '—'}</span></div>
@@ -403,6 +683,11 @@
       </div>`;
     }).join('');
   }
+
+  $('tickets-list').addEventListener('click', e => {
+    const row = e.target.closest('.row[data-ts]');
+    if (row) openSheet(Number(row.dataset.ts), `Ticket #${row.dataset.n}`);
+  });
 
   // ---------- Days screen ----------
   function renderDays() {
@@ -434,24 +719,42 @@
         <button id="export">Export backup</button>
         <label>Import backup<input id="import" type="file" accept="application/json,.json" hidden></label>
       </div>
-      <div class="note">Data is saved on this phone only. Export now and then for safekeeping.</div>
+      <div class="note">${cloud ? 'Synced to your claude.ai account.' : 'Data is saved on this phone only.'} Export now and then for safekeeping.</div>
       ${taps.length ? '<button id="reset">Reset all data</button>' : ''}`;
   }
 
+  // Two taps to reset: the first arms the button for a few seconds.
+  const RESET_ARM_MS = 4000;
+  let resetArmed = 0;
   document.addEventListener('click', e => {
     if (e.target.id !== 'reset') return;
     const n = taps.length;
-    if (!confirm(`Delete all ${n} tap${n === 1 ? '' : 's'}? This can’t be undone. Export a backup first if you might want them back.`)) return;
-    taps = []; ends = []; save();
+    if (Date.now() - resetArmed > RESET_ARM_MS) {
+      resetArmed = Date.now();
+      e.target.textContent = `Tap again to delete all ${n} tap${n === 1 ? '' : 's'}`;
+      e.target.classList.add('armed');
+      setTimeout(() => {
+        const b = $('reset');
+        if (b && Date.now() - resetArmed >= RESET_ARM_MS) { b.textContent = 'Reset all data'; b.classList.remove('armed'); }
+      }, RESET_ARM_MS);
+      return;
+    }
+    resetArmed = 0;
+    taps = []; ends = []; cats = {}; save();
+    toast('All data deleted');
     clearTimeout(undoTimeout); undoBtn.classList.remove('show');
     render();
   });
 
   document.addEventListener('click', async e => {
     if (e.target.id !== 'export') return;
-    const json = JSON.stringify({ app: 'ticket-tracker', version: 1, exported: new Date().toISOString(), taps, ends }, null, 1);
+    const json = JSON.stringify({ app: 'ticket-tracker', version: 1, exported: new Date().toISOString(), taps, ends, cats }, null, 1);
     const file = new File([json], `tickets-${todayKey()}.json`, { type: 'application/json' });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    const downloads = window.claude?.use ? await claude.use('downloads') : null;
+    if (downloads) {
+      try { await downloads.save({ filename: file.name, data: json }); }
+      catch (err) { if (err?.code !== 'declined') toast('Couldn’t export the backup. Try again in a moment.'); }
+    } else if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ files: [file] }); } catch {}
     } else {
       const a = document.createElement('a');
@@ -471,10 +774,12 @@
       const added = merged.length - taps.length;
       const incomingEnds = (Array.isArray(data.ends) ? data.ends : []).filter(Number.isFinite);
       ends = [...new Set([...ends, ...incomingEnds])].sort((a, b) => a - b);
+      // Keep categories already set here; only fill in ones we don't have.
+      for (const [ts, c] of Object.entries(data.cats || {})) if (typeof c === 'string' && !(ts in cats)) cats[ts] = c;
       taps = merged; save(); render();
-      alert(`Imported ${added} new tap${added === 1 ? '' : 's'}.`);
+      toast(`Imported ${added} new tap${added === 1 ? '' : 's'}`);
     } catch {
-      alert('That file doesn’t look like a ticket tracker backup.');
+      toast('That file isn’t a ticket tracker backup.');
     }
     e.target.value = '';
   });
@@ -506,7 +811,9 @@
 
   render();
 
-  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  startSync().catch(() => {});
+
+  if ('serviceWorker' in navigator && location.protocol === 'https:' && !window.claude) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 })();
