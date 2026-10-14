@@ -51,18 +51,6 @@
     transition: transform .08s ease-out, box-shadow .08s ease-out;
   }
   #btn.pressed { transform: scale(.95); box-shadow: 0 8px 30px -10px rgba(255, 111, 181, .6), inset 0 -6px 20px rgba(140, 0, 70, .25), inset 0 8px 24px rgba(255, 255, 255, .25); }
-  /* Glitter: scattered dots from overlapping grids of different sizes, twinkling. */
-  #btn::before {
-    content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
-    background-image:
-      radial-gradient(circle, #fff 0 1px, transparent 1.6px),
-      radial-gradient(circle, rgba(255, 255, 255, .85) 0 1.2px, transparent 2px),
-      radial-gradient(circle, #ffe9f6 0 .8px, transparent 1.4px),
-      radial-gradient(circle, #fff6d6 0 1.5px, transparent 2.2px);
-    background-size: 23px 29px, 37px 31px, 17px 19px, 53px 47px;
-    background-position: 0 0, 11px 7px, 5px 13px, 21px 30px;
-    animation: twinkle 1.8s ease-in-out infinite alternate;
-  }
   /* Shimmer: a soft highlight sweeping across every few seconds. */
   #btn::after {
     content: ''; position: absolute; inset: -20%; z-index: -1; pointer-events: none;
@@ -70,7 +58,6 @@
     transform: translateX(-100%);
     animation: shimmer 3.5s ease-in-out infinite;
   }
-  @keyframes twinkle { from { opacity: .35; } to { opacity: .95; } }
   @keyframes shimmer { 0%, 60% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
   #count { font-size: calc(var(--size) * .36); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.02em; text-shadow: 0 2px 12px rgba(160, 0, 80, .35); }
   #timer { margin-top: calc(var(--size) * .04); font-size: calc(var(--size) * .1); font-weight: 500; opacity: .9; font-variant-numeric: tabular-nums; text-shadow: 0 1px 8px rgba(160, 0, 80, .35); }
@@ -102,7 +89,6 @@
     100% { transform: translate(var(--dx), var(--dy)) scale(.3) rotate(var(--r)); opacity: 0; }
   }
   @media (prefers-reduced-motion: reduce) {
-    #btn::before, #btn::after { animation: none; }
     #btn::after { display: none; }
   }
   #label { margin-top: 18px; color: var(--muted); font-size: 14px; letter-spacing: .04em; text-transform: uppercase; }
