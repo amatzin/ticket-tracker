@@ -7,19 +7,19 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Tickets">
-<meta name="theme-color" content="#0e0e11">
+<meta name="theme-color" content="#170d15">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
 <title>Ticket Tracker</title>
 <style>
   :root {
-    --bg: #0e0e11;
-    --surface: #18181d;
-    --line: #26262d;
-    --text: #f4f4f6;
-    --muted: #8a8a96;
-    --accent: #ff3d6e;
-    --accent-2: #e0234f;
+    --bg: #170d15;
+    --surface: #241520;
+    --line: #3a2333;
+    --text: #fff4fa;
+    --muted: #b48fa6;
+    --accent: #ff6fb5;
+    --accent-2: #e8459a;
     --tab-h: 64px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -43,15 +43,68 @@
     --size: min(78vw, 58vh, 420px);
     width: var(--size); height: var(--size); border-radius: 50%;
     border: 0; padding: 0; color: #fff; cursor: pointer;
-    background: radial-gradient(circle at 35% 30%, #ff7a9a 0%, var(--accent) 45%, var(--accent-2) 100%);
-    box-shadow: 0 20px 60px -10px rgba(255, 61, 110, .45), inset 0 -10px 30px rgba(0,0,0,.18);
+    background: radial-gradient(circle at 35% 30%, #ffd6ec 0%, #ff9ccf 30%, var(--accent) 62%, var(--accent-2) 100%);
+    box-shadow: 0 20px 60px -10px rgba(255, 111, 181, .55), inset 0 -10px 30px rgba(140, 0, 70, .22), inset 0 10px 30px rgba(255, 255, 255, .25);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
+    position: relative; overflow: hidden; isolation: isolate;
     touch-action: manipulation;
     transition: transform .08s ease-out, box-shadow .08s ease-out;
   }
-  #btn.pressed { transform: scale(.95); box-shadow: 0 8px 30px -10px rgba(255, 61, 110, .5), inset 0 -6px 20px rgba(0,0,0,.2); }
-  #count { font-size: calc(var(--size) * .36); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
-  #timer { margin-top: calc(var(--size) * .04); font-size: calc(var(--size) * .1); font-weight: 500; opacity: .9; font-variant-numeric: tabular-nums; }
+  #btn.pressed { transform: scale(.95); box-shadow: 0 8px 30px -10px rgba(255, 111, 181, .6), inset 0 -6px 20px rgba(140, 0, 70, .25), inset 0 8px 24px rgba(255, 255, 255, .25); }
+  /* Glitter: scattered dots from overlapping grids of different sizes, twinkling. */
+  #btn::before {
+    content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+    background-image:
+      radial-gradient(circle, #fff 0 1px, transparent 1.6px),
+      radial-gradient(circle, rgba(255, 255, 255, .85) 0 1.2px, transparent 2px),
+      radial-gradient(circle, #ffe9f6 0 .8px, transparent 1.4px),
+      radial-gradient(circle, #fff6d6 0 1.5px, transparent 2.2px);
+    background-size: 23px 29px, 37px 31px, 17px 19px, 53px 47px;
+    background-position: 0 0, 11px 7px, 5px 13px, 21px 30px;
+    animation: twinkle 1.8s ease-in-out infinite alternate;
+  }
+  /* Shimmer: a soft highlight sweeping across every few seconds. */
+  #btn::after {
+    content: ''; position: absolute; inset: -20%; z-index: -1; pointer-events: none;
+    background: linear-gradient(115deg, transparent 40%, rgba(255, 255, 255, .35) 50%, transparent 60%);
+    transform: translateX(-100%);
+    animation: shimmer 3.5s ease-in-out infinite;
+  }
+  @keyframes twinkle { from { opacity: .35; } to { opacity: .95; } }
+  @keyframes shimmer { 0%, 60% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+  #count { font-size: calc(var(--size) * .36); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.02em; text-shadow: 0 2px 12px rgba(160, 0, 80, .35); }
+  #timer { margin-top: calc(var(--size) * .04); font-size: calc(var(--size) * .1); font-weight: 500; opacity: .9; font-variant-numeric: tabular-nums; text-shadow: 0 1px 8px rgba(160, 0, 80, .35); }
+
+  /* ---------- Tap effects: a gum bubble that pops into sparkles ---------- */
+  #fx { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 10; }
+  #fx i { position: absolute; display: block; }
+  .pop {
+    width: var(--s); height: var(--s); margin: calc(var(--s) / -2) 0 0 calc(var(--s) / -2); border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .85) 0 9%, rgba(255, 194, 226, .55) 22%, rgba(255, 111, 181, .3) 70%, rgba(255, 111, 181, .65) 100%);
+    animation: pop .32s ease-out forwards;
+  }
+  @keyframes pop {
+    0% { transform: scale(.15); opacity: .95; }
+    60% { transform: scale(1); opacity: .95; }
+    100% { transform: scale(1.5); opacity: 0; }
+  }
+  .spark {
+    width: var(--z); height: var(--z); margin: calc(var(--z) / -2) 0 0 calc(var(--z) / -2);
+    background: var(--c);
+    clip-path: polygon(50% 0, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0 50%, 39% 39%);
+    animation: spark var(--d) cubic-bezier(.15, .7, .3, 1) var(--delay) both;
+  }
+  .spark.dot { clip-path: none; border-radius: 50%; width: calc(var(--z) / 2); height: calc(var(--z) / 2); }
+  @keyframes spark {
+    0% { transform: translate(0, 0) scale(.2) rotate(0); opacity: 0; }
+    10% { opacity: 1; }
+    45% { transform: translate(calc(var(--dx) * .75), calc(var(--dy) * .75)) scale(1.15) rotate(calc(var(--r) * .5)); opacity: 1; }
+    100% { transform: translate(var(--dx), var(--dy)) scale(.3) rotate(var(--r)); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #btn::before, #btn::after { animation: none; }
+    #btn::after { display: none; }
+  }
   #label { margin-top: 18px; color: var(--muted); font-size: 14px; letter-spacing: .04em; text-transform: uppercase; }
   #undo {
     margin-top: 14px; height: 36px; padding: 0 18px; border-radius: 18px;
@@ -99,7 +152,7 @@
   nav {
     position: fixed; left: 0; right: 0; bottom: 0;
     height: calc(var(--tab-h) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom);
-    display: flex; background: rgba(14,14,17,.92); border-top: 1px solid var(--line);
+    display: flex; background: rgba(23,13,21,.92); border-top: 1px solid var(--line);
     -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
   }
   nav button {
@@ -130,6 +183,8 @@
   <h1>Tickets per day</h1>
   <div id="days-list"></div>
 </section>
+
+<div id="fx"></div>
 
 <nav>
   <button data-tab="tap" class="active">
@@ -234,11 +289,38 @@
     timerEl.textContent = n ? timerText(Date.now() - last) : '0:00';
   }
 
+  // A gum bubble inflates at the tap point, pops, and throws out glitter.
+  const fx = $('fx');
+  const calm = matchMedia('(prefers-reduced-motion: reduce)');
+  const SPARK_COLORS = ['#fff', '#ffe3f2', '#ff9ccf', '#ffd76a', '#d9c8ff'];
+  function burst(x, y) {
+    if (calm.matches) return;
+    const size = btn.offsetWidth;
+    const add = (cls, vars) => {
+      const el = document.createElement('i');
+      el.className = cls;
+      el.style.left = x + 'px'; el.style.top = y + 'px';
+      for (const k in vars) el.style.setProperty(k, vars[k]);
+      el.addEventListener('animationend', () => el.remove());
+      fx.appendChild(el);
+    };
+    add('pop', { '--s': size * .35 + 'px' });
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * Math.PI * 2, dist = size * (.2 + Math.random() * .35);
+      add(Math.random() < .35 ? 'spark dot' : 'spark', {
+        '--dx': Math.cos(a) * dist + 'px', '--dy': Math.sin(a) * dist + 'px',
+        '--z': 8 + Math.random() * 12 + 'px', '--c': SPARK_COLORS[i % SPARK_COLORS.length],
+        '--r': Math.random() * 360 - 180 + 'deg', '--d': 550 + Math.random() * 400 + 'ms', '--delay': '170ms',
+      });
+    }
+  }
+
   btn.addEventListener('pointerdown', e => {
     e.preventDefault();
     taps.push(Date.now());
     save();
     renderTap();
+    burst(e.clientX, e.clientY);
     btn.classList.add('pressed');
     undoBtn.classList.add('show');
     clearTimeout(undoTimeout);
