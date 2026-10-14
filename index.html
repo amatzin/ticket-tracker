@@ -98,6 +98,11 @@
     visibility: hidden; opacity: 0; transition: opacity .2s;
   }
   #undo.show { visibility: visible; opacity: 1; }
+  #end {
+    margin-top: 6px; height: 36px; padding: 0 18px; border: 0; background: none;
+    color: var(--muted); font: inherit; font-size: 15px; visibility: hidden;
+  }
+  #end.show { visibility: visible; }
 
   /* ---------- Lists ---------- */
   h1 { font-size: 28px; margin: 20px 0 12px; letter-spacing: -.01em; }
@@ -158,6 +163,7 @@
   </button>
   <div id="label">tickets today</div>
   <button id="undo">Undo last tap</button>
+  <button id="end">End day</button>
 </section>
 
 <section id="tickets" class="screen">
@@ -187,12 +193,14 @@
 <script>
 (() => {
   const KEY = 'ticket-tracker.taps.v1';
+  const ENDS_KEY = 'ticket-tracker.ends.v1';
   const UNDO_MS = 5000;
 
   // ---------- Storage ----------
-  // Data is just a sorted array of tap timestamps (ms). Everything else is derived.
-  function load() {
-    const raw = localStorage.getItem(KEY);
+  // Data is two sorted arrays of timestamps (ms): taps start tickets, ends stop the
+  // day's running ticket. Everything else is derived.
+  function load(key = KEY) {
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     try {
       const arr = JSON.parse(raw);
@@ -200,24 +208,26 @@
       return arr.filter(Number.isFinite).sort((a, b) => a - b);
     } catch {
       // Never silently overwrite data we couldn't read: stash it first.
-      localStorage.setItem(KEY + '.corrupt.' + Date.now(), raw);
+      localStorage.setItem(key + '.corrupt.' + Date.now(), raw);
       return [];
     }
   }
   function save() {
     try {
       localStorage.setItem(KEY, JSON.stringify(taps));
+      localStorage.setItem(ENDS_KEY, JSON.stringify(ends));
     } catch {
       alert('Could not save — storage is full or blocked. Export a backup from the Days tab.');
     }
   }
-  let taps = load();
+  let taps = load(), ends = load(ENDS_KEY);
+  const reload = () => { taps = load(); ends = load(ENDS_KEY); };
 
   // Ask the browser not to evict our storage (no-op where unsupported).
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
   // Keep in sync if the app is open in two places on the same device.
-  addEventListener('storage', e => { if (e.key === KEY) { taps = load(); render(); } });
+  addEventListener('storage', e => { if (e.key === KEY || e.key === ENDS_KEY) { reload(); render(); } });
 
   // ---------- Helpers ----------
   const pad = n => String(n).padStart(2, '0');
@@ -244,8 +254,19 @@
     return new Date(Y, M - 1, D).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
-  // Group taps by day. A ticket lasts from its tap until the next tap on the same day;
-  // the last ticket of today is still running, the last one of a past day is open-ended.
+  // A ticket lasts from its tap until the next tap or the day being ended, whichever comes
+  // first (same day only). Returns Infinity when nothing has stopped it yet.
+  function stopOf(start, nextTap = Infinity) {
+    const end = ends.find(e => e > start && dayKey(e) === dayKey(start));
+    return Math.min(nextTap, end ?? Infinity);
+  }
+  function running() {
+    const last = taps[taps.length - 1];
+    return last != null && dayKey(last) === todayKey() && stopOf(last) === Infinity;
+  }
+
+  // Group taps by day. The unstopped last ticket of today is still running; on a past
+  // day that wasn't ended it's open-ended.
   function byDay() {
     const days = new Map();
     for (const t of taps) {
@@ -254,17 +275,21 @@
       days.get(k).push(t);
     }
     return [...days.entries()].reverse().map(([key, list]) => {
-      const tickets = list.map((start, i) => ({ n: i + 1, start, dur: i + 1 < list.length ? list[i + 1] - start : null }));
+      const tickets = list.map((start, i) => {
+        const stop = stopOf(start, list[i + 1]);
+        return { n: i + 1, start, dur: stop < Infinity ? stop - start : null };
+      });
       const done = tickets.filter(t => t.dur != null);
       const avg = done.length ? done.reduce((a, t) => a + t.dur, 0) / done.length : null;
-      return { key, tickets, avg, span: list[list.length - 1] - list[0] };
+      const last = tickets[tickets.length - 1];
+      return { key, tickets, avg, ended: last.dur != null ? last.start + last.dur : null };
     });
   }
 
   // ---------- Tap screen ----------
   const $ = id => document.getElementById(id);
-  const btn = $('btn'), countEl = $('count'), timerEl = $('timer'), undoBtn = $('undo');
-  let undoTimeout;
+  const btn = $('btn'), countEl = $('count'), timerEl = $('timer'), labelEl = $('label'), undoBtn = $('undo'), endBtn = $('end');
+  let undoTimeout, undoKind;
 
   function renderTap() {
     const t = todayKey();
@@ -272,7 +297,18 @@
     for (let i = taps.length - 1; i >= 0 && dayKey(taps[i]) === t; i--) n++;
     countEl.textContent = n;
     const last = taps[taps.length - 1];
-    timerEl.textContent = n ? timerText(Date.now() - last) : '0:00';
+    const live = running();
+    timerEl.textContent = live ? timerText(Date.now() - last) : n ? 'done' : '0:00';
+    labelEl.textContent = n && !live ? `tickets today · ended ${clock(stopOf(last))}` : 'tickets today';
+    endBtn.classList.toggle('show', live);
+  }
+
+  function offerUndo(kind) {
+    undoKind = kind;
+    undoBtn.textContent = kind === 'end' ? 'Undo end day' : 'Undo last tap';
+    undoBtn.classList.add('show');
+    clearTimeout(undoTimeout);
+    undoTimeout = setTimeout(() => undoBtn.classList.remove('show'), UNDO_MS);
   }
 
   // A gum bubble inflates at the tap point, pops, and throws out glitter.
@@ -308,9 +344,7 @@
     renderTap();
     burst(e.clientX, e.clientY);
     btn.classList.add('pressed');
-    undoBtn.classList.add('show');
-    clearTimeout(undoTimeout);
-    undoTimeout = setTimeout(() => undoBtn.classList.remove('show'), UNDO_MS);
+    offerUndo('tap');
     keepAwake();
   });
   const release = () => btn.classList.remove('pressed');
@@ -319,12 +353,22 @@
   btn.addEventListener('pointerleave', release);
 
   undoBtn.addEventListener('click', () => {
-    if (taps.length && Date.now() - taps[taps.length - 1] < UNDO_MS + 1000) {
-      taps.pop();
+    const list = undoKind === 'end' ? ends : taps;
+    if (list.length && Date.now() - list[list.length - 1] < UNDO_MS + 1000) {
+      list.pop();
       save();
       renderTap();
     }
     undoBtn.classList.remove('show');
+  });
+
+  // Stops today's running ticket. Tapping again later just starts a new ticket.
+  endBtn.addEventListener('click', () => {
+    if (!running()) return;
+    ends.push(Date.now());
+    save();
+    renderTap();
+    offerUndo('end');
   });
 
   // Keep the screen on while the app is visible (iOS 16.4+). Silently ignored elsewhere.
@@ -337,7 +381,7 @@
     } catch {}
   }
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { taps = load(); render(); keepAwake(); }
+    if (document.visibilityState === 'visible') { reload(); render(); keepAwake(); }
   });
 
   // ---------- Tickets screen ----------
@@ -371,7 +415,7 @@
       <div class="day-row">
         <span class="day-name">${dayLabel(d.key)}</span>
         <span class="day-count">${d.tickets.length}</span>
-        <span class="day-meta">avg ${d.avg != null ? durText(d.avg) : '—'} · ${clock(d.tickets[0].start)}–${clock(d.tickets[d.tickets.length - 1].start)}</span>
+        <span class="day-meta">avg ${d.avg != null ? durText(d.avg) : '—'} · ${clock(d.tickets[0].start)}–${clock(d.ended ?? d.tickets[d.tickets.length - 1].start)}</span>
         <div class="bar"><i style="width:${(d.tickets.length / max) * 100}%"></i></div>
       </div>`).join('');
     $('days-list').innerHTML = `
@@ -398,14 +442,14 @@
     if (e.target.id !== 'reset') return;
     const n = taps.length;
     if (!confirm(`Delete all ${n} tap${n === 1 ? '' : 's'}? This can’t be undone. Export a backup first if you might want them back.`)) return;
-    taps = []; save();
+    taps = []; ends = []; save();
     clearTimeout(undoTimeout); undoBtn.classList.remove('show');
     render();
   });
 
   document.addEventListener('click', async e => {
     if (e.target.id !== 'export') return;
-    const json = JSON.stringify({ app: 'ticket-tracker', version: 1, exported: new Date().toISOString(), taps }, null, 1);
+    const json = JSON.stringify({ app: 'ticket-tracker', version: 1, exported: new Date().toISOString(), taps, ends }, null, 1);
     const file = new File([json], `tickets-${todayKey()}.json`, { type: 'application/json' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ files: [file] }); } catch {}
@@ -425,6 +469,8 @@
       // Merge instead of replace, so importing can never lose taps.
       const merged = [...new Set([...taps, ...incoming])].sort((a, b) => a - b);
       const added = merged.length - taps.length;
+      const incomingEnds = (Array.isArray(data.ends) ? data.ends : []).filter(Number.isFinite);
+      ends = [...new Set([...ends, ...incomingEnds])].sort((a, b) => a - b);
       taps = merged; save(); render();
       alert(`Imported ${added} new tap${added === 1 ? '' : 's'}.`);
     } catch {
