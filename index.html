@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tickets">
+<meta name="theme-color" content="#0e0e11">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Ticket Tracker</title>
+<style>
+  :root {
+    --bg: #0e0e11;
+    --surface: #18181d;
+    --line: #26262d;
+    --text: #f4f4f6;
+    --muted: #8a8a96;
+    --accent: #ff3d6e;
+    --accent-2: #e0234f;
+    --tab-h: 64px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+  body {
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none;
+    overscroll-behavior: none;
+  }
+  .screen {
+    position: fixed; inset: 0; bottom: calc(var(--tab-h) + env(safe-area-inset-bottom));
+    padding: env(safe-area-inset-top) 16px 0;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    display: none;
+  }
+  .screen.active { display: block; }
+
+  /* ---------- Tap screen ---------- */
+  #tap.active { display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
+  #btn {
+    --size: min(78vw, 58vh, 420px);
+    width: var(--size); height: var(--size); border-radius: 50%;
+    border: 0; padding: 0; color: #fff; cursor: pointer;
+    background: radial-gradient(circle at 35% 30%, #ff7a9a 0%, var(--accent) 45%, var(--accent-2) 100%);
+    box-shadow: 0 20px 60px -10px rgba(255, 61, 110, .45), inset 0 -10px 30px rgba(0,0,0,.18);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    touch-action: manipulation;
+    transition: transform .08s ease-out, box-shadow .08s ease-out;
+  }
+  #btn.pressed { transform: scale(.95); box-shadow: 0 8px 30px -10px rgba(255, 61, 110, .5), inset 0 -6px 20px rgba(0,0,0,.2); }
+  #count { font-size: calc(var(--size) * .36); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  #timer { margin-top: calc(var(--size) * .04); font-size: calc(var(--size) * .1); font-weight: 500; opacity: .9; font-variant-numeric: tabular-nums; }
+  #label { margin-top: 18px; color: var(--muted); font-size: 14px; letter-spacing: .04em; text-transform: uppercase; }
+  #undo {
+    margin-top: 14px; height: 36px; padding: 0 18px; border-radius: 18px;
+    background: var(--surface); color: var(--text); border: 1px solid var(--line); font: inherit; font-size: 15px;
+    visibility: hidden; opacity: 0; transition: opacity .2s;
+  }
+  #undo.show { visibility: visible; opacity: 1; }
+
+  /* ---------- Lists ---------- */
+  h1 { font-size: 28px; margin: 20px 0 12px; letter-spacing: -.01em; }
+  .group { margin-bottom: 20px; }
+  .group-head { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 2px; color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  .card { background: var(--surface); border-radius: 14px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .row:first-child { border-top: 0; }
+  .num { color: var(--muted); width: 36px; }
+  .time { color: var(--muted); flex: 1; }
+  .dur { font-weight: 600; }
+  .dur.live { color: var(--accent); }
+  .dur.none { color: var(--muted); font-weight: 400; }
+  .day-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 12px 14px; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .day-row:first-child { border-top: 0; }
+  .day-name { font-weight: 600; }
+  .day-count { font-weight: 700; font-size: 20px; text-align: right; grid-row: span 2; align-self: center; }
+  .day-meta { color: var(--muted); font-size: 13px; }
+  .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+  .summary { display: flex; gap: 10px; margin-bottom: 20px; }
+  .stat { flex: 1; background: var(--surface); border-radius: 14px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+  .tools { display: flex; gap: 10px; margin: 8px 0 28px; }
+  .tools button, .tools label {
+    flex: 1; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface);
+    color: var(--text); font: inherit; font-size: 15px; display: flex; align-items: center; justify-content: center;
+  }
+  .note { color: var(--muted); font-size: 12px; text-align: center; margin: -16px 0 28px; }
+  #reset {
+    display: block; width: 100%; height: 44px; margin: 0 0 28px; border-radius: 12px;
+    border: 1px solid var(--line); background: none; color: var(--accent); font: inherit; font-size: 15px;
+  }
+
+  /* ---------- Tab bar ---------- */
+  nav {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    height: calc(var(--tab-h) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom);
+    display: flex; background: rgba(14,14,17,.92); border-top: 1px solid var(--line);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  }
+  nav button {
+    flex: 1; background: none; border: 0; color: var(--muted); font: inherit; font-size: 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  }
+  nav button svg { width: 24px; height: 24px; }
+  nav button.active { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<section id="tap" class="screen active">
+  <button id="btn" aria-label="Add ticket">
+    <span id="count">0</span>
+    <span id="timer">0:00</span>
+  </button>
+  <div id="label">tickets today</div>
+  <button id="undo">Undo last tap</button>
+</section>
+
+<section id="tickets" class="screen">
+  <h1>Time per ticket</h1>
+  <div id="tickets-list"></div>
+</section>
+
+<section id="days" class="screen">
+  <h1>Tickets per day</h1>
+  <div id="days-list"></div>
+</section>
+
+<nav>
+  <button data-tab="tap" class="active">
+    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="9"/></svg>Tap
+  </button>
+  <button data-tab="tickets">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Tickets
+  </button>
+  <button data-tab="days">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 20V12M12 20V5M19 20v-9"/></svg>Days
+  </button>
+</nav>
+
+<script>
+(() => {
+  const KEY = 'ticket-tracker.taps.v1';
+  const UNDO_MS = 5000;
+
+  // ---------- Storage ----------
+  // Data is just a sorted array of tap timestamps (ms). Everything else is derived.
+  function load() {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) throw new Error('bad shape');
+      return arr.filter(Number.isFinite).sort((a, b) => a - b);
+    } catch {
+      // Never silently overwrite data we couldn't read: stash it first.
+      localStorage.setItem(KEY + '.corrupt.' + Date.now(), raw);
+      return [];
+    }
+  }
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(taps));
+    } catch {
+      alert('Could not save — storage is full or blocked. Export a backup from the Days tab.');
+    }
+  }
+  let taps = load();
+
+  // Ask the browser not to evict our storage (no-op where unsupported).
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
+  // Keep in sync if the app is open in two places on the same device.
+  addEventListener('storage', e => { if (e.key === KEY) { taps = load(); render(); } });
+
+  // ---------- Helpers ----------
+  const pad = n => String(n).padStart(2, '0');
+  const dayKey = ms => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  const todayKey = () => dayKey(Date.now());
+  const clock = ms => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+  function timerText(ms) {
+    const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+    return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+  }
+  function durText(ms) {
+    const s = Math.round(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+    if (h) return `${h}h ${pad(m)}m`;
+    if (m) return `${m}m ${pad(s % 60)}s`;
+    return `${s}s`;
+  }
+  function dayLabel(key) {
+    const t = todayKey();
+    const y = new Date(); y.setDate(y.getDate() - 1);
+    if (key === t) return 'Today';
+    if (key === dayKey(y)) return 'Yesterday';
+    const [Y, M, D] = key.split('-').map(Number);
+    return new Date(Y, M - 1, D).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  // Group taps by day. A ticket lasts from its tap until the next tap on the same day;
+  // the last ticket of today is still running, the last one of a past day is open-ended.
+  function byDay() {
+    const days = new Map();
+    for (const t of taps) {
+      const k = dayKey(t);
+      if (!days.has(k)) days.set(k, []);
+      days.get(k).push(t);
+    }
+    return [...days.entries()].reverse().map(([key, list]) => {
+      const tickets = list.map((start, i) => ({ n: i + 1, start, dur: i + 1 < list.length ? list[i + 1] - start : null }));
+      const done = tickets.filter(t => t.dur != null);
+      const avg = done.length ? done.reduce((a, t) => a + t.dur, 0) / done.length : null;
+      return { key, tickets, avg, span: list[list.length - 1] - list[0] };
+    });
+  }
+
+  // ---------- Tap screen ----------
+  const $ = id => document.getElementById(id);
+  const btn = $('btn'), countEl = $('count'), timerEl = $('timer'), undoBtn = $('undo');
+  let undoTimeout;
+
+  function renderTap() {
+    const t = todayKey();
+    let n = 0;
+    for (let i = taps.length - 1; i >= 0 && dayKey(taps[i]) === t; i--) n++;
+    countEl.textContent = n;
+    const last = taps[taps.length - 1];
+    timerEl.textContent = n ? timerText(Date.now() - last) : '0:00';
+  }
+
+  btn.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    taps.push(Date.now());
+    save();
+    renderTap();
+    btn.classList.add('pressed');
+    undoBtn.classList.add('show');
+    clearTimeout(undoTimeout);
+    undoTimeout = setTimeout(() => undoBtn.classList.remove('show'), UNDO_MS);
+    keepAwake();
+  });
+  const release = () => btn.classList.remove('pressed');
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave', release);
+
+  undoBtn.addEventListener('click', () => {
+    if (taps.length && Date.now() - taps[taps.length - 1] < UNDO_MS + 1000) {
+      taps.pop();
+      save();
+      renderTap();
+    }
+    undoBtn.classList.remove('show');
+  });
+
+  // Keep the screen on while the app is visible (iOS 16.4+). Silently ignored elsewhere.
+  let wakeLock = null;
+  async function keepAwake() {
+    if (wakeLock || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch {}
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { taps = load(); render(); keepAwake(); }
+  });
+
+  // ---------- Tickets screen ----------
+  function renderTickets() {
+    const days = byDay();
+    const today = todayKey();
+    if (!days.length) { $('tickets-list').innerHTML = '<div class="empty">No tickets yet.</div>'; return; }
+    $('tickets-list').innerHTML = days.map(d => {
+      const rows = d.tickets.slice().reverse().map(t => {
+        let dur;
+        if (t.dur != null) dur = `<span class="dur">${durText(t.dur)}</span>`;
+        else if (d.key === today) dur = `<span class="dur live" data-live="${t.start}">${durText(Date.now() - t.start)}</span>`;
+        else dur = `<span class="dur none">—</span>`;
+        return `<div class="row"><span class="num">#${t.n}</span><span class="time">${clock(t.start)}</span>${dur}</div>`;
+      }).join('');
+      return `<div class="group">
+        <div class="group-head"><span>${dayLabel(d.key)}</span><span>${d.tickets.length} · avg ${d.avg != null ? durText(d.avg) : '—'}</span></div>
+        <div class="card">${rows}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // ---------- Days screen ----------
+  function renderDays() {
+    const days = byDay();
+    if (!days.length) { $('days-list').innerHTML = '<div class="empty">No tickets yet.</div>' + toolsHtml(); return; }
+    const max = Math.max(...days.map(d => d.tickets.length));
+    const total = taps.length;
+    const avgPerDay = total / days.length;
+    const rows = days.map(d => `
+      <div class="day-row">
+        <span class="day-name">${dayLabel(d.key)}</span>
+        <span class="day-count">${d.tickets.length}</span>
+        <span class="day-meta">avg ${d.avg != null ? durText(d.avg) : '—'} · ${clock(d.tickets[0].start)}–${clock(d.tickets[d.tickets.length - 1].start)}</span>
+        <div class="bar"><i style="width:${(d.tickets.length / max) * 100}%"></i></div>
+      </div>`).join('');
+    $('days-list').innerHTML = `
+      <div class="summary">
+        <div class="stat"><b>${total}</b><span>All time</span></div>
+        <div class="stat"><b>${avgPerDay.toFixed(1)}</b><span>Avg / day</span></div>
+        <div class="stat"><b>${days.length}</b><span>Days</span></div>
+      </div>
+      <div class="card">${rows}</div>
+      <div style="height:20px"></div>
+      ${toolsHtml()}`;
+  }
+
+  function toolsHtml() {
+    return `<div class="tools">
+        <button id="export">Export backup</button>
+        <label>Import backup<input id="import" type="file" accept="application/json,.json" hidden></label>
+      </div>
+      <div class="note">Data is saved on this phone only. Export now and then for safekeeping.</div>
+      ${taps.length ? '<button id="reset">Reset all data</button>' : ''}`;
+  }
+
+  document.addEventListener('click', e => {
+    if (e.target.id !== 'reset') return;
+    const n = taps.length;
+    if (!confirm(`Delete all ${n} tap${n === 1 ? '' : 's'}? This can’t be undone. Export a backup first if you might want them back.`)) return;
+    taps = []; save();
+    clearTimeout(undoTimeout); undoBtn.classList.remove('show');
+    render();
+  });
+
+  document.addEventListener('click', async e => {
+    if (e.target.id !== 'export') return;
+    const json = JSON.stringify({ app: 'ticket-tracker', version: 1, exported: new Date().toISOString(), taps }, null, 1);
+    const file = new File([json], `tickets-${todayKey()}.json`, { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); } catch {}
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(file); a.download = file.name; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+  });
+
+  document.addEventListener('change', async e => {
+    if (e.target.id !== 'import' || !e.target.files[0]) return;
+    try {
+      const data = JSON.parse(await e.target.files[0].text());
+      const incoming = (Array.isArray(data) ? data : data.taps).filter(Number.isFinite);
+      if (!incoming.length) throw new Error();
+      // Merge instead of replace, so importing can never lose taps.
+      const merged = [...new Set([...taps, ...incoming])].sort((a, b) => a - b);
+      const added = merged.length - taps.length;
+      taps = merged; save(); render();
+      alert(`Imported ${added} new tap${added === 1 ? '' : 's'}.`);
+    } catch {
+      alert('That file doesn’t look like a ticket tracker backup.');
+    }
+    e.target.value = '';
+  });
+
+  // ---------- Tabs & render loop ----------
+  let tab = 'tap';
+  document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
+    tab = b.dataset.tab;
+    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === tab));
+    render();
+  }));
+
+  function render() {
+    if (tab === 'tap') renderTap();
+    else if (tab === 'tickets') renderTickets();
+    else renderDays();
+  }
+
+  let lastDay = todayKey();
+  setInterval(() => {
+    // Re-render everything when the date rolls over so "today" resets to 0.
+    if (todayKey() !== lastDay) { lastDay = todayKey(); render(); return; }
+    if (tab === 'tap') renderTap();
+    else if (tab === 'tickets') document.querySelectorAll('[data-live]').forEach(el => {
+      el.textContent = durText(Date.now() - Number(el.dataset.live));
+    });
+  }, 250);
+
+  render();
+
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>
