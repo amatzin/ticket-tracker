@@ -103,6 +103,15 @@
     visibility: hidden; opacity: 0; transition: opacity .2s;
   }
   #undo.show { visibility: visible; opacity: 1; }
+  /* Kept in the corner, well away from the bubble, so it isn't hit by accident. */
+  #minus {
+    position: absolute; top: calc(env(safe-area-inset-top) + 16px); right: 16px;
+    width: 44px; height: 44px; border-radius: 50%; padding: 0;
+    background: var(--surface); color: var(--muted); border: 1px solid var(--line);
+    font: inherit; font-size: 24px; line-height: 1; visibility: hidden;
+  }
+  #minus.show { visibility: visible; }
+  #minus:active { color: var(--accent); border-color: var(--accent); }
 
   /* ---------- Lists ---------- */
   h1 { font-size: 28px; margin: 20px 0 12px; letter-spacing: -.01em; }
@@ -116,6 +125,12 @@
   .dur { font-weight: 600; }
   .dur.live { color: var(--accent); }
   .dur.none { color: var(--muted); font-weight: 400; }
+  .totals { display: flex; font-variant-numeric: tabular-nums; }
+  .totals > div { flex: 1; padding: 10px 14px; }
+  .totals > div + div { border-left: 1px solid var(--line); }
+  .totals b { display: block; font-size: 18px; }
+  .totals b.live { color: var(--accent); }
+  .totals span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
   .day-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 12px 14px; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
   .day-row:first-child { border-top: 0; }
   .day-name { font-weight: 600; }
@@ -213,6 +228,7 @@
 <body>
 
 <section id="tap" class="screen active">
+  <button id="minus" aria-label="Remove last ticket">−</button>
   <button id="btn" aria-label="Start ticket">
     <span id="count">0</span>
     <span id="timer">0:00</span>
@@ -465,15 +481,16 @@
         return { n: i + 1, start, dur: stop < Infinity ? stop - start : null };
       });
       const done = tickets.filter(t => t.dur != null);
-      const avg = done.length ? done.reduce((a, t) => a + t.dur, 0) / done.length : null;
+      const logged = done.reduce((a, t) => a + t.dur, 0);
+      const avg = done.length ? logged / done.length : null;
       const last = tickets[tickets.length - 1];
-      return { key, tickets, avg, ended: last.dur != null ? last.start + last.dur : null };
+      return { key, tickets, avg, logged, ended: last.dur != null ? last.start + last.dur : null };
     });
   }
 
   // ---------- Tap screen ----------
   const $ = id => document.getElementById(id);
-  const btn = $('btn'), countEl = $('count'), timerEl = $('timer'), labelEl = $('label'), undoBtn = $('undo');
+  const btn = $('btn'), countEl = $('count'), timerEl = $('timer'), labelEl = $('label'), undoBtn = $('undo'), minusBtn = $('minus');
   let undoTimeout, undoKind, undoTarget;
 
   function renderTap() {
@@ -488,12 +505,13 @@
     labelEl.textContent = n && !live ? `paused ${clock(stopOf(last))} · tap for next` : 'tickets today';
     btn.classList.toggle('paused', n > 0 && !live);
     btn.setAttribute('aria-label', live ? 'Pause ticket' : 'Start ticket');
+    minusBtn.classList.toggle('show', n > 0);
   }
 
-  function offerUndo(kind) {
+  function offerUndo(kind, target) {
     const list = kind === 'end' ? ends : taps;
-    undoKind = kind; undoTarget = list[list.length - 1];
-    undoBtn.textContent = kind === 'end' ? 'Undo pause' : 'Undo new ticket';
+    undoKind = kind; undoTarget = target ?? list[list.length - 1];
+    undoBtn.textContent = { end: 'Undo pause', tap: 'Undo new ticket', remove: 'Undo remove' }[kind];
     undoBtn.classList.add('show');
     clearTimeout(undoTimeout);
     undoTimeout = setTimeout(() => undoBtn.classList.remove('show'), UNDO_MS);
@@ -556,6 +574,19 @@
   btn.addEventListener('pointerleave', release);
 
   undoBtn.addEventListener('click', () => {
+    if (undoKind === 'remove') {
+      const r = undoTarget;
+      // Only if nothing was tapped since, so the restored ticket is still the latest.
+      if ((taps[taps.length - 1] ?? -Infinity) < r.tap) {
+        taps.push(r.tap);
+        if (r.cat) cats[r.tap] = r.cat;
+        ends = r.ends;
+        save();
+        renderTap();
+      }
+      undoBtn.classList.remove('show');
+      return;
+    }
     const list = undoKind === 'end' ? ends : taps;
     if (list.length && list[list.length - 1] === undoTarget) {
       list.pop();
@@ -564,6 +595,29 @@
       renderTap();
     }
     undoBtn.classList.remove('show');
+  });
+
+  // Removes today's latest ticket, as if it was never tapped. The previous ticket keeps
+  // its time: if only the removed tap had stopped it (data from before pausing existed)
+  // and the day was stopped after, it now stops where the removed ticket started.
+  minusBtn.addEventListener('click', () => {
+    const t = taps[taps.length - 1];
+    if (t == null || dayKey(t) !== todayKey()) return;
+    const n = countEl.textContent;
+    const removed = { tap: t, cat: cats[t], ends: ends.slice() };
+    const wasStopped = ends.some(e => e > t && dayKey(e) === dayKey(t));
+    taps.pop();
+    delete cats[t];
+    ends = ends.filter(e => !(e > t && dayKey(e) === dayKey(t)));
+    const prev = taps[taps.length - 1];
+    if (wasStopped && prev != null && dayKey(prev) === dayKey(t) && stopOf(prev) === Infinity) {
+      ends.push(t); ends.sort((a, b) => a - b);
+    }
+    clearTimeout(pickerTimeout);
+    save();
+    renderTap();
+    offerUndo('remove', removed);
+    toast(`Removed ticket #${n}`);
   });
 
   // ---------- Category picker ----------
@@ -677,9 +731,20 @@
         const cat = cats[t.start] ? `<span class="cat">${esc(cats[t.start])}</span>` : '';
         return `<div class="row" data-ts="${t.start}" data-n="${t.n}"><span class="num">#${t.n}</span><span class="time">${clock(t.start)}${cat}</span>${dur}</div>`;
       }).join('');
+      // Day span: first ticket until the day was ended. Logged: the tickets' own time, so
+      // breaks between ending and tapping again don't count. Both tick while today runs.
+      const first = d.tickets[0].start, last = d.tickets[d.tickets.length - 1];
+      const live = d.key === today && d.ended == null;
+      const tot = (ms, liveFrom) => live
+        ? `<b class="live" data-live="${liveFrom}">${durText(Date.now() - liveFrom)}</b>`
+        : `<b>${ms != null ? durText(ms) : '—'}</b>`;
+      const totals = `<div class="totals">
+          <div>${tot(d.ended != null ? d.ended - first : null, first)}<span>Day span</span></div>
+          <div>${tot(d.logged, last.start - d.logged)}<span>Logged</span></div>
+        </div>`;
       return `<div class="group">
         <div class="group-head"><span>${dayLabel(d.key)}</span><span>${d.tickets.length} · avg ${d.avg != null ? durText(d.avg) : '—'}</span></div>
-        <div class="card">${rows}</div>
+        <div class="card">${totals}${rows}</div>
       </div>`;
     }).join('');
   }
